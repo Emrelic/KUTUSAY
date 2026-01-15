@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Box icon representing package counting -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,27L27,40.5v27L54,81l27,-13.5v-27L54,27zM54,33l18.9,9.45L54,51.9L35.1,42.45L54,33zM33,45.9l18,9v20.7l-18,-9V45.9zM57,75.6V54.9l18,-9v20.7L57,75.6z"/>
+</vector>

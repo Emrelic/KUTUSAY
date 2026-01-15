@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">KUTUSAY</string>
+
+    <!-- Home Screen -->
+    <string name="start_invoice_check">Fatura Kontrolu Baslat</string>
+    <string name="view_history">Gecmis Kayitlar</string>
+
+    <!-- Camera Screen -->
+    <string name="take_photo">Fotograf Cek</string>
+    <string name="capture_invoice">Fatura Fotografini Cekin</string>
+    <string name="capture_boxes">Kutularin Fotografini Cekin</string>
+    <string name="camera_permission_required">Kamera izni gerekli</string>
+    <string name="grant_permission">Izin Ver</string>
+
+    <!-- Invoice Result Screen -->
+    <string name="invoice_items">Fatura Kalemleri</string>
+    <string name="item_name">Ilac Adi</string>
+    <string name="item_quantity">Adet</string>
+    <string name="continue_to_box_count">Kutu Sayimina Devam Et</string>
+    <string name="edit_items">Duzenle</string>
+    <string name="add_item">Kalem Ekle</string>
+    <string name="delete_item">Sil</string>
+
+    <!-- Box Count Screen -->
+    <string name="box_count_title">Kutu Sayimi</string>
+    <string name="enter_box_count">Kutu sayisini girin</string>
+    <string name="take_box_photo">Kutu Fotografı Cek</string>
+    <string name="compare_results">Karsilastir</string>
+
+    <!-- Comparison Screen -->
+    <string name="comparison_title">Karsilastirma Raporu</string>
+    <string name="match">Eslesme</string>
+    <string name="mismatch">Uyusmazlik</string>
+    <string name="invoice_count">Fatura: %d kutu</string>
+    <string name="actual_count">Sayim: %d kutu</string>
+    <string name="share_via_whatsapp">WhatsApp ile Paylas</string>
+    <string name="save_report">Raporu Kaydet</string>
+    <string name="new_check">Yeni Kontrol</string>
+
+    <!-- General -->
+    <string name="cancel">Iptal</string>
+    <string name="save">Kaydet</string>
+    <string name="ok">Tamam</string>
+    <string name="error">Hata</string>
+    <string name="loading">Yukleniyor...</string>
+    <string name="processing_image">Goruntu isleniyor...</string>
+    <string name="no_text_found">Metin bulunamadi</string>
+</resources>
