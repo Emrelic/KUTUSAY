@@ -21,8 +21,10 @@ data class InvoiceItem(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
     val invoiceId: Long,
-    val name: String,           // Ilac adi
-    val quantity: Int,          // Kutu sayisi
-    val unit: String = "kutu",  // Birim (kutu, adet, vs.)
-    val barcode: String? = null // Barkod (opsiyonel)
+    val name: String,              // Ilac adi
+    val quantity: Int,             // Kutu/adet sayisi
+    val unit: String = "kutu",     // Birim (kutu, adet, vs.)
+    val unitPrice: Double? = null, // Birim fiyati
+    val totalPrice: Double? = null,// Toplam fiyat
+    val barcode: String? = null    // Barkod (opsiyonel)
 )

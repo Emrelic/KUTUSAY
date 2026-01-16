@@ -124,6 +124,7 @@ private fun CameraPreview(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val mainExecutor = remember { ContextCompat.getMainExecutor(context) }
 
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
     var isCapturing by remember { mutableStateOf(false) }
@@ -216,12 +217,16 @@ private fun CameraPreview(
                             object : ImageCapture.OnImageSavedCallback {
                                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                                     val uri = ImageUtils.getUriForFile(context, photoFile)
-                                    isCapturing = false
-                                    onPhotoTaken(uri)
+                                    mainExecutor.execute {
+                                        isCapturing = false
+                                        onPhotoTaken(uri)
+                                    }
                                 }
 
                                 override fun onError(exception: ImageCaptureException) {
-                                    isCapturing = false
+                                    mainExecutor.execute {
+                                        isCapturing = false
+                                    }
                                     exception.printStackTrace()
                                 }
                             }

@@ -12,7 +12,7 @@ import com.emrelic.kutusay.data.model.InvoiceItem
         InvoiceItem::class,
         BoxCount::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

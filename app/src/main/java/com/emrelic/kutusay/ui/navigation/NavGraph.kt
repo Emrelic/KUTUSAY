@@ -1,5 +1,6 @@
 package com.emrelic.kutusay.ui.navigation
 
+import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -11,14 +12,26 @@ import com.emrelic.kutusay.ui.screens.camera.CameraScreen
 import com.emrelic.kutusay.ui.screens.invoice.InvoiceResultScreen
 import com.emrelic.kutusay.ui.screens.boxcount.BoxCountScreen
 import com.emrelic.kutusay.ui.screens.comparison.ComparisonScreen
+import java.net.URLDecoder
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 sealed class Screen(val route: String) {
     object Home : Screen("home")
     object Camera : Screen("camera/{type}") {
         fun createRoute(type: CameraType) = "camera/${type.name}"
     }
-    object InvoiceResult : Screen("invoice_result/{invoiceId}") {
-        fun createRoute(invoiceId: Long) = "invoice_result/$invoiceId"
+    object InvoiceResult : Screen("invoice_result/{invoiceId}?imageUri={imageUri}") {
+        fun createRoute(invoiceId: Long, imageUri: String? = null): String {
+            val encodedUri = imageUri?.let {
+                URLEncoder.encode(it, StandardCharsets.UTF_8.toString())
+            }
+            return if (encodedUri != null) {
+                "invoice_result/$invoiceId?imageUri=$encodedUri"
+            } else {
+                "invoice_result/$invoiceId"
+            }
+        }
     }
     object BoxCount : Screen("box_count/{invoiceId}") {
         fun createRoute(invoiceId: Long) = "box_count/$invoiceId"
@@ -64,8 +77,8 @@ fun NavGraph(
                 onPhotoTaken = { uri ->
                     when (cameraType) {
                         CameraType.INVOICE -> {
-                            // InvoiceResult ekranina git (invoiceId gecici olarak 0)
-                            navController.navigate(Screen.InvoiceResult.createRoute(0)) {
+                            // InvoiceResult ekranina git ve imageUri'yi aktar
+                            navController.navigate(Screen.InvoiceResult.createRoute(0, uri.toString())) {
                                 // Camera ekranini stack'ten kaldir
                                 popUpTo(Screen.Camera.route) { inclusive = true }
                             }
@@ -82,13 +95,23 @@ fun NavGraph(
         composable(
             route = Screen.InvoiceResult.route,
             arguments = listOf(
-                navArgument("invoiceId") { type = NavType.LongType }
+                navArgument("invoiceId") { type = NavType.LongType },
+                navArgument("imageUri") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                }
             )
         ) { backStackEntry ->
             val invoiceId = backStackEntry.arguments?.getLong("invoiceId") ?: 0L
+            val encodedImageUri = backStackEntry.arguments?.getString("imageUri")
+            val imageUri = encodedImageUri?.let {
+                Uri.parse(URLDecoder.decode(it, StandardCharsets.UTF_8.toString()))
+            }
 
             InvoiceResultScreen(
                 invoiceId = invoiceId,
+                initialImageUri = imageUri,
                 onContinueToBoxCount = { id ->
                     navController.navigate(Screen.BoxCount.createRoute(id))
                 },

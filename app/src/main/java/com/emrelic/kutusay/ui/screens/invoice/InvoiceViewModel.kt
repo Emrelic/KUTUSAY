@@ -25,7 +25,9 @@ data class InvoiceUiState(
     val items: List<InvoiceItem> = emptyList(),
     val rawText: String = "",
     val imageUri: Uri? = null,
-    val isSaved: Boolean = false
+    val isSaved: Boolean = false,
+    val totalQuantity: Int = 0,
+    val totalAmount: Double? = null
 )
 
 @HiltViewModel
@@ -54,7 +56,9 @@ class InvoiceViewModel @Inject constructor(
                         invoiceNo = parsedInvoice.invoiceNo,
                         supplierName = parsedInvoice.supplierName,
                         items = parsedInvoice.items,
-                        rawText = parsedInvoice.rawText
+                        rawText = parsedInvoice.rawText,
+                        totalQuantity = parsedInvoice.totalQuantity,
+                        totalAmount = parsedInvoice.totalAmount
                     )
                 },
                 onFailure = { exception ->

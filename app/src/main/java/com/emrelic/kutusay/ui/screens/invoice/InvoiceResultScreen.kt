@@ -25,6 +25,7 @@ import com.emrelic.kutusay.util.ImageUtils
 @Composable
 fun InvoiceResultScreen(
     invoiceId: Long,
+    initialImageUri: Uri? = null,
     onContinueToBoxCount: (Long) -> Unit,
     onBack: () -> Unit,
     viewModel: InvoiceViewModel = hiltViewModel()
@@ -34,6 +35,7 @@ fun InvoiceResultScreen(
 
     var showAddItemDialog by remember { mutableStateOf(false) }
     var editingItemIndex by remember { mutableStateOf<Int?>(null) }
+    var hasProcessedInitialImage by remember { mutableStateOf(false) }
 
     // Image picker for selecting from gallery
     val imagePickerLauncher = rememberLauncherForActivityResult(
@@ -52,14 +54,22 @@ fun InvoiceResultScreen(
         }
     }
 
+    // Process initial image URI from camera
+    LaunchedEffect(initialImageUri, hasProcessedInitialImage) {
+        if (initialImageUri != null && !hasProcessedInitialImage) {
+            hasProcessedInitialImage = true
+            viewModel.processInvoiceImage(initialImageUri)
+        }
+    }
+
     LaunchedEffect(invoiceId) {
         if (invoiceId > 0) {
             viewModel.loadInvoice(invoiceId)
         }
     }
 
-    // If no image yet, show option to take/select photo
-    if (uiState.imageUri == null && !uiState.isLoading) {
+    // If no image yet and no initial image, show option to take/select photo
+    if (uiState.imageUri == null && !uiState.isLoading && initialImageUri == null) {
         LaunchedEffect(Unit) {
             val file = ImageUtils.createImageFile(context, "FATURA")
             tempPhotoUri = ImageUtils.getUriForFile(context, file)
@@ -200,20 +210,32 @@ fun InvoiceResultScreen(
                                 containerColor = MaterialTheme.colorScheme.primaryContainer
                             )
                         ) {
-                            Row(
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(16.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                    .padding(16.dp)
                             ) {
-                                Text(
-                                    text = "Toplam Kalem: ${uiState.items.size}",
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                                Text(
-                                    text = "Toplam Kutu: ${uiState.items.sumOf { it.quantity }}",
-                                    style = MaterialTheme.typography.titleMedium
-                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "Toplam Kalem: ${uiState.items.size}",
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Text(
+                                        text = "Toplam Kutu: ${uiState.totalQuantity}",
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                }
+                                if (uiState.totalAmount != null) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = "Toplam Tutar: ${String.format("%.2f", uiState.totalAmount)} TL",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             }
                         }
                     }
@@ -364,11 +386,29 @@ private fun InvoiceItemCard(
                     text = item.name,
                     style = MaterialTheme.typography.titleMedium
                 )
-                Text(
-                    text = "${item.quantity} ${item.unit}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Text(
+                        text = "${item.quantity} ${item.unit}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    if (item.unitPrice != null) {
+                        Text(
+                            text = "Birim: ${String.format("%.2f", item.unitPrice)} TL",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                if (item.totalPrice != null) {
+                    Text(
+                        text = "Toplam: ${String.format("%.2f", item.totalPrice)} TL",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
             }
             Row {
                 IconButton(onClick = onEdit) {
@@ -394,6 +434,7 @@ private fun AddEditItemDialog(
 ) {
     var name by remember { mutableStateOf(item?.name ?: "") }
     var quantity by remember { mutableStateOf(item?.quantity?.toString() ?: "1") }
+    var unitPrice by remember { mutableStateOf(item?.unitPrice?.toString() ?: "") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -416,19 +457,32 @@ private fun AddEditItemDialog(
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                 )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = unitPrice,
+                    onValueChange = { unitPrice = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
+                    label = { Text("Birim Fiyat (TL)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                )
             }
         },
         confirmButton = {
             Button(
                 onClick = {
                     if (name.isNotBlank()) {
+                        val qty = quantity.toIntOrNull() ?: 1
+                        val price = unitPrice.replace(",", ".").toDoubleOrNull()
                         onSave(
                             InvoiceItem(
                                 id = item?.id ?: 0,
                                 invoiceId = item?.invoiceId ?: 0,
                                 name = name.trim(),
-                                quantity = quantity.toIntOrNull() ?: 1,
-                                unit = "kutu"
+                                quantity = qty,
+                                unit = "kutu",
+                                unitPrice = price,
+                                totalPrice = price?.let { it * qty }
                             )
                         )
                     }
