@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -5,6 +7,14 @@ plugins {
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
 }
+
+// Cloud Vision API key'i local.properties'den oku
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localProperties.load(localPropertiesFile.inputStream())
+}
+val cloudVisionApiKey: String = localProperties.getProperty("CLOUD_VISION_API_KEY", "")
 
 android {
     namespace = "com.emrelic.kutusay"
@@ -21,6 +31,9 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // Cloud Vision API key BuildConfig'e ekle
+        buildConfigField("String", "CLOUD_VISION_API_KEY", "\"$cloudVisionApiKey\"")
     }
 
     buildTypes {
@@ -41,7 +54,9 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -89,4 +104,8 @@ dependencies {
 
     // Image loading
     implementation(libs.coil.compose)
+
+    // Network (Cloud Vision API)
+    implementation(libs.okhttp)
+    implementation(libs.gson)
 }
