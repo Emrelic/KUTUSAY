@@ -24,6 +24,7 @@ data class BoxCount(
     val itemName: String? = null,       // Ilac adi (opsiyonel, OCR'dan tespit edilirse)
     val count: Int,                     // Sayilan kutu adedi
     val imageUri: String? = null,       // Kutu fotografinin URI'si
-    val note: String? = null,           // Not
+    // TODO: Kullanici notu ozelligi UI'da eklenmeli
+    val note: String? = null,           // Not (henuz UI'da kullanilmiyor)
     val createdAt: Long = System.currentTimeMillis()
 )

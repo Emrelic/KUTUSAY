@@ -26,5 +26,6 @@ data class InvoiceItem(
     val unit: String = "kutu",     // Birim (kutu, adet, vs.)
     val unitPrice: Double? = null, // Birim fiyati
     val totalPrice: Double? = null,// Toplam fiyat
-    val barcode: String? = null    // Barkod (opsiyonel)
+    // TODO: Barkod tarama ozelligi eklendiginde kullanilacak
+    val barcode: String? = null    // Barkod (opsiyonel, henuz kullanilmiyor)
 )

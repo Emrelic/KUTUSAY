@@ -9,6 +9,16 @@ plugins {
 }
 
 // Cloud Vision API key'i local.properties'den oku
+// ============================================================================
+// GUVENLIK UYARISI / SECURITY WARNING:
+// API anahtari BuildConfig icine gomulur ve APK decompile edilirse gorulebilir.
+// Production ortami icin asagidaki cozumlerden birini kullanin:
+// 1. Backend proxy: API anahtarini sunucuda tutun, istemci sunucuya istek atsin
+// 2. Firebase Remote Config: Anahtari Firebase'den runtime'da alin
+// 3. API key restrictions: Google Cloud Console'da anahtari kisitlayin
+//    - Android apps only (SHA-1 fingerprint)
+//    - API restrictions (sadece Vision API)
+// ============================================================================
 val localProperties = Properties()
 val localPropertiesFile = rootProject.file("local.properties")
 if (localPropertiesFile.exists()) {

@@ -17,10 +17,21 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.math.abs
+
+/**
+ * Cloud Vision API hata tipleri
+ */
+sealed class CloudVisionException(message: String, cause: Throwable? = null) : Exception(message, cause) {
+    class ApiKeyNotConfigured : CloudVisionException("Cloud Vision API key not configured")
+    class NetworkError(cause: Throwable) : CloudVisionException("Network error: ${cause.message}", cause)
+    class ApiError(val code: Int, val body: String) : CloudVisionException("API error $code: $body")
+    class ParseError(cause: Throwable) : CloudVisionException("Failed to parse response: ${cause.message}", cause)
+    class ImageLoadError(cause: Throwable) : CloudVisionException("Failed to load image: ${cause.message}", cause)
+}
 
 /**
  * Google Cloud Vision API ile OCR servisi
@@ -34,7 +45,8 @@ class CloudVisionService @Inject constructor(
         private const val TAG = "CloudVisionService"
         private const val VISION_API_URL = "https://vision.googleapis.com/v1/images:annotate"
         private const val MAX_IMAGE_SIZE = 1024
-        private const val LINE_THRESHOLD = 15 // Ayni satir icin Y toleransi (piksel)
+        private const val MAX_RETRY_COUNT = 3
+        private const val RETRY_DELAY_MS = 1000L
     }
 
     private val client = OkHttpClient.Builder()
@@ -51,20 +63,38 @@ class CloudVisionService @Inject constructor(
 
     suspend fun recognizeText(imageUri: Uri): String = withContext(Dispatchers.IO) {
         if (!isAvailable()) {
-            throw IllegalStateException("Cloud Vision API key not configured")
+            throw CloudVisionException.ApiKeyNotConfigured()
         }
 
-        val bitmap = loadAndResizeBitmap(imageUri)
-        recognizeTextFromBitmap(bitmap)
+        val bitmap = try {
+            loadAndResizeBitmap(imageUri)
+        } catch (e: Exception) {
+            throw CloudVisionException.ImageLoadError(e)
+        }
+
+        try {
+            recognizeTextFromBitmapWithRetry(bitmap)
+        } finally {
+            if (!bitmap.isRecycled) {
+                bitmap.recycle()
+            }
+        }
     }
 
     suspend fun recognizeText(bitmap: Bitmap): String = withContext(Dispatchers.IO) {
         if (!isAvailable()) {
-            throw IllegalStateException("Cloud Vision API key not configured")
+            throw CloudVisionException.ApiKeyNotConfigured()
         }
 
         val resizedBitmap = resizeBitmap(bitmap)
-        recognizeTextFromBitmap(resizedBitmap)
+        try {
+            recognizeTextFromBitmapWithRetry(resizedBitmap)
+        } finally {
+            // Sadece yeniden boyutlandirildiysa recycle et
+            if (resizedBitmap !== bitmap && !resizedBitmap.isRecycled) {
+                resizedBitmap.recycle()
+            }
+        }
     }
 
     /**
@@ -83,20 +113,85 @@ class CloudVisionService @Inject constructor(
      */
     suspend fun recognizeTextDetailed(imageUri: Uri): DetailedOcrResult = withContext(Dispatchers.IO) {
         if (!isAvailable()) {
-            throw IllegalStateException("Cloud Vision API key not configured")
+            throw CloudVisionException.ApiKeyNotConfigured()
         }
 
-        val bitmap = loadAndResizeBitmap(imageUri)
-        recognizeTextDetailedFromBitmap(bitmap)
+        val bitmap = try {
+            loadAndResizeBitmap(imageUri)
+        } catch (e: Exception) {
+            throw CloudVisionException.ImageLoadError(e)
+        }
+
+        recognizeTextDetailedFromBitmapWithRetry(bitmap)
+        // NOT: Bitmap burada recycle edilmiyor cunku DetailedOcrResult icinde kullaniliyor
     }
 
     suspend fun recognizeTextDetailed(bitmap: Bitmap): DetailedOcrResult = withContext(Dispatchers.IO) {
         if (!isAvailable()) {
-            throw IllegalStateException("Cloud Vision API key not configured")
+            throw CloudVisionException.ApiKeyNotConfigured()
         }
 
         val resizedBitmap = resizeBitmap(bitmap)
-        recognizeTextDetailedFromBitmap(resizedBitmap)
+        recognizeTextDetailedFromBitmapWithRetry(resizedBitmap)
+    }
+
+    /**
+     * Retry mekanizmasi ile OCR
+     */
+    private suspend fun recognizeTextFromBitmapWithRetry(bitmap: Bitmap): String {
+        var lastException: Exception? = null
+        repeat(MAX_RETRY_COUNT) { attempt ->
+            try {
+                return recognizeTextFromBitmap(bitmap)
+            } catch (e: IOException) {
+                lastException = e
+                Log.w(TAG, "Network error on attempt ${attempt + 1}/$MAX_RETRY_COUNT: ${e.message}")
+                if (attempt < MAX_RETRY_COUNT - 1) {
+                    kotlinx.coroutines.delay(RETRY_DELAY_MS * (attempt + 1))
+                }
+            } catch (e: CloudVisionException.ApiError) {
+                // 5xx hatalari icin retry yap, 4xx icin yapma
+                if (e.code in 500..599) {
+                    lastException = e
+                    Log.w(TAG, "Server error on attempt ${attempt + 1}/$MAX_RETRY_COUNT: ${e.message}")
+                    if (attempt < MAX_RETRY_COUNT - 1) {
+                        kotlinx.coroutines.delay(RETRY_DELAY_MS * (attempt + 1))
+                    }
+                } else {
+                    throw e
+                }
+            }
+        }
+        throw CloudVisionException.NetworkError(lastException ?: Exception("Unknown error after $MAX_RETRY_COUNT retries"))
+    }
+
+    /**
+     * Retry mekanizmasi ile detayli OCR
+     */
+    private suspend fun recognizeTextDetailedFromBitmapWithRetry(bitmap: Bitmap): DetailedOcrResult {
+        var lastException: Exception? = null
+        repeat(MAX_RETRY_COUNT) { attempt ->
+            try {
+                return recognizeTextDetailedFromBitmap(bitmap)
+            } catch (e: IOException) {
+                lastException = e
+                Log.w(TAG, "Network error on attempt ${attempt + 1}/$MAX_RETRY_COUNT: ${e.message}")
+                if (attempt < MAX_RETRY_COUNT - 1) {
+                    kotlinx.coroutines.delay(RETRY_DELAY_MS * (attempt + 1))
+                }
+            } catch (e: CloudVisionException.ApiError) {
+                if (e.code in 500..599) {
+                    lastException = e
+                    Log.w(TAG, "Server error on attempt ${attempt + 1}/$MAX_RETRY_COUNT: ${e.message}")
+                    if (attempt < MAX_RETRY_COUNT - 1) {
+                        kotlinx.coroutines.delay(RETRY_DELAY_MS * (attempt + 1))
+                    }
+                } else {
+                    throw e
+                }
+            }
+        }
+        throw CloudVisionException.NetworkError(lastException ?: Exception("Unknown error after $MAX_RETRY_COUNT retries"))
     }
 
     /**
@@ -129,10 +224,11 @@ class CloudVisionService @Inject constructor(
         if (!response.isSuccessful) {
             val errorBody = response.body?.string() ?: "Unknown error"
             Log.e(TAG, "API error: ${response.code} - $errorBody")
-            throw Exception("Cloud Vision API error: ${response.code}")
+            throw CloudVisionException.ApiError(response.code, errorBody)
         }
 
-        val responseBody = response.body?.string() ?: throw Exception("Empty response")
+        val responseBody = response.body?.string()
+            ?: throw CloudVisionException.ParseError(Exception("Empty response"))
         Log.d(TAG, "Detailed OCR response received, parsing words...")
 
         val visionResponse = gson.fromJson(responseBody, VisionResponse::class.java)
@@ -216,13 +312,18 @@ class CloudVisionService @Inject constructor(
         if (!response.isSuccessful) {
             val errorBody = response.body?.string() ?: "Unknown error"
             Log.e(TAG, "API error: ${response.code} - $errorBody")
-            throw Exception("Cloud Vision API error: ${response.code}")
+            throw CloudVisionException.ApiError(response.code, errorBody)
         }
 
-        val responseBody = response.body?.string() ?: throw Exception("Empty response")
+        val responseBody = response.body?.string()
+            ?: throw CloudVisionException.ParseError(Exception("Empty response"))
         Log.d(TAG, "Response received, parsing...")
 
-        val visionResponse = gson.fromJson(responseBody, VisionResponse::class.java)
+        val visionResponse = try {
+            gson.fromJson(responseBody, VisionResponse::class.java)
+        } catch (e: Exception) {
+            throw CloudVisionException.ParseError(e)
+        }
 
         // Oncelik 1: fullTextAnnotation - Google'in okuma sirasi algoritmasi
         val fullText = visionResponse.responses?.firstOrNull()?.fullTextAnnotation?.text
@@ -243,68 +344,6 @@ class CloudVisionService @Inject constructor(
 
         Log.w(TAG, "No text found in image")
         ""
-    }
-
-    /**
-     * Kelimeleri Y koordinatina gore satirlara grupla
-     * Ayni satirdaki kelimeler X koordinatina gore siralanir
-     * Merkez Y koordinati kullanilarak zincir etkisi onlenir
-     */
-    private fun groupTextByLines(annotations: List<TextAnnotation>): String {
-        // Her kelimenin Y koordinatini ve metnini al
-        data class WordWithPosition(
-            val text: String,
-            val minX: Int,
-            val minY: Int,
-            val maxY: Int,
-            val centerY: Int
-        )
-
-        val words = annotations.mapNotNull { annotation ->
-            val vertices = annotation.boundingPoly?.vertices
-            if (vertices != null && vertices.size >= 4 && annotation.description != null) {
-                val minX = vertices.mapNotNull { it.x }.minOrNull() ?: 0
-                val minY = vertices.mapNotNull { it.y }.minOrNull() ?: 0
-                val maxY = vertices.mapNotNull { it.y }.maxOrNull() ?: 0
-                val centerY = (minY + maxY) / 2
-                WordWithPosition(annotation.description, minX, minY, maxY, centerY)
-            } else {
-                null
-            }
-        }
-
-        if (words.isEmpty()) return ""
-
-        // Kelimeleri centerY'ye gore sirala ve satirlara grupla
-        val sortedWords = words.sortedBy { it.centerY }
-        val lines = mutableListOf<MutableList<WordWithPosition>>()
-
-        for (word in sortedWords) {
-            // Bu kelimenin centerY'si mevcut bir satirin ilk kelimesinin centerY'sine yakin mi?
-            val matchingLine = lines.find { line ->
-                // Satirin ilk kelimesinin centerY'sini referans al (genislemeyi onle)
-                val lineBaseCenterY = line.first().centerY
-                abs(word.centerY - lineBaseCenterY) <= LINE_THRESHOLD
-            }
-
-            if (matchingLine != null) {
-                matchingLine.add(word)
-            } else {
-                // Yeni satir olustur
-                lines.add(mutableListOf(word))
-            }
-        }
-
-        // Her satiri X koordinatina gore sirala ve birlestir
-        val result = StringBuilder()
-        for (line in lines.sortedBy { it.first().centerY }) {
-            val sortedLineWords = line.sortedBy { it.minX }
-            val lineText = sortedLineWords.joinToString(" ") { it.text }
-            result.appendLine(lineText)
-        }
-
-        Log.d(TAG, "Grouped ${words.size} words into ${lines.size} lines")
-        return result.toString()
     }
 
     private fun loadAndResizeBitmap(uri: Uri): Bitmap {

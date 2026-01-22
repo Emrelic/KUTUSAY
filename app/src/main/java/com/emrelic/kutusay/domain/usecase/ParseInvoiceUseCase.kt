@@ -27,6 +27,25 @@ class ParseInvoiceUseCase @Inject constructor(
     companion object {
         private const val TAG = "ParseInvoiceUseCase"
 
+        // ===== YAPILANDIRMA SABITLERI =====
+        /** Gecerli fatura icin minimum ilac sayisi */
+        private const val MIN_MEDICINE_COUNT = 2
+        /** Gecerli fatura icin beyan edilen degerle minimum uyum orani */
+        private const val MIN_DECLARED_MATCH_RATIO = 0.5
+        /** Gecersiz isim orani esigi (konum kodu gibi gorunenler) */
+        private const val MAX_INVALID_NAME_RATIO = 0.3
+        /** Miktar aralik kontrolu */
+        private const val MIN_QUANTITY = 1
+        private const val MAX_QUANTITY = 50
+        /** Promosyon miktar limiti */
+        private const val MAX_PROMO_QUANTITY = 10
+        /** Gecerli miad ay araligi */
+        private const val MIN_EXPIRY_MONTH = 1
+        private const val MAX_EXPIRY_MONTH = 12
+        /** Gecerli miad yil araligi (20XX formatinda son 2 hane) */
+        private const val MIN_EXPIRY_YEAR = 24
+        private const val MAX_EXPIRY_YEAR = 35
+
         // Bilinen ilac isimleri - OCR'dan bagimsiz eslestirme icin
         // NOT: CO-DIOVAN ve DIOVAN ayni ilac, sadece CO-DIOVAN kullan
         private val KNOWN_MEDICINES = listOf(
@@ -50,42 +69,60 @@ class ParseInvoiceUseCase @Inject constructor(
             "SASE", "ŞASE", "SACHET"
         )
 
+        // ===== ONCEDEN DERLENMI REGEX PATERNLERI =====
         // Toplam satiri paterni - farkli formatlari ve OCR hatalarini destekle
-        // "TOPLAM 15 KALEM, 158 ADETTIR" veya "ADFTTIR" (OCR hatasi)
         private val TOTAL_LINE_PATTERN = Regex(
             """TOPLAM\s*(\d+)\s*KALEM[,.\s]*(\d+)\s*AD[EF][TI]?T[TI]?[IR]""",
             RegexOption.IGNORE_CASE
         )
-        // Alternatif: "15 KALEM, 158 ADETTIR" (TOPLAM ayri satirda)
         private val TOTAL_LINE_ALT_PATTERN = Regex(
             """(\d+)\s*KALEM[,.\s]*(\d+)\s*AD[EF][TI]?T[TI]?[IR]""",
             RegexOption.IGNORE_CASE
         )
-        // Ters siralama (OCR karisik): "158 KALEM 15 TOPLAM" veya ". 158 , KALEM 15 TOPLAM"
         private val TOTAL_LINE_REVERSE_PATTERN = Regex(
             """[.,\s]*(\d+)\s*[.,\s]*KALEM\s*(\d+)\s*TOPLAM""",
             RegexOption.IGNORE_CASE
         )
-
-        // Yer kodu paterni: 1-2 rakam + 2 harf + tire/bosluk + ilac adi
-        // Ornekler: "4AD- APRANAX", "6BD-APRANAX", "2CE- CO-DIOVAN"
         private val LOCATION_CODE_PATTERN = Regex(
             """^(\d[A-Z]{2}[-\s]+)(.+)$""",
             RegexOption.IGNORE_CASE
         )
-
-        // Miktar + miad birlestik paterni: "2504/30" veya "25 04/30" -> miktar=25, miad=04/30
-        // Veya promosyonlu: "10+108/28" veya "10+1 08/28" -> miktar=11, miad=08/28
+        private val LOCATION_CODE_ALT_PATTERN = Regex(
+            """^(\d[A-Z]{2})([A-Z]{3,}.*)""",
+            RegexOption.IGNORE_CASE
+        )
+        private val LOCATION_CODE_CHECK_PATTERN = Regex(
+            """^\d[A-Z]{2}[-\s]""",
+            RegexOption.IGNORE_CASE
+        )
+        private val LOCATION_CODE_MULTI_PATTERN = Regex(
+            """\d[A-Z]{2}[-\s]""",
+            RegexOption.IGNORE_CASE
+        )
         private val QTY_MIAD_PATTERN = Regex(
             """(\d{1,2})(\+(\d{1,2}))?\s*(\d{1,2}/\d{2})""",
             RegexOption.IGNORE_CASE
         )
-
-        // Sadece miktar + promosyon paterni: "10+1", "5+1"
         private val QTY_PROMO_PATTERN = Regex("""^(\d{1,2})\+(\d{1,2})$""")
-
-        // Miad paterni: XX/YY (ay/yil)
         private val MIAD_PATTERN = Regex("""\d{1,2}/\d{2}""")
+        private val PROMO_MIAD_PATTERN = Regex("""(\d{1,2})\+(\d)(\d{2}/\d{2})""")
+        private val PROMO_SPACE_PATTERN = Regex("""(\d{1,2})\+(\d{1,2})\s+(\d{1,2}/\d{2})""")
+        private val SEPARATE_QTY_MIAD_PATTERN = Regex("""(\d{1,2})\s+(\d{1,2}/\d{2})""")
+        private val MERGED_QTY_MIAD_PATTERN = Regex("""(\d{1,2})(\d{2}/\d{2})""")
+        private val OCR_ERROR_MIAD_PATTERN = Regex("""(\d{1,2})\s+[a-zA-Z]?\d/\d{2}""")
+        private val LINE_START_QTY_PATTERN = Regex("""^(\d{1,2})\s+[\(\[/]""")
+        private val KALEM_PATTERN = Regex("""(\d+)\s*KALEM""", RegexOption.IGNORE_CASE)
+        private val ADET_PATTERN = Regex("""(\d+)\s*AD[EF]?[TI]?T[TI]?[IR]""", RegexOption.IGNORE_CASE)
+        private val B2K_INVOICE_PATTERN = Regex("""B2K\d{10,}""")
+        private val EARSIV_PATTERN = Regex("""E-?Ar[sş]iv\s*No\s*:?\s*([A-Z0-9]+)""", RegexOption.IGNORE_CASE)
+        private val ECZA_DEPOSU_PATTERN = Regex("""([A-ZÇĞİÖŞÜa-zçğıöşü]+\s+)?[Ee]cza\s*[Dd]eposu""")
+        private val ALPHANUMERIC_ONLY_PATTERN = Regex("""[^A-Z0-9]""")
+        private val ALPHA_ONLY_PATTERN = Regex("""[^A-Z]""")
+        private val PRICE_PATTERN = Regex("""\s+\d{1,4}[.,]\d{2}.*$""")
+        private val PERCENT_PATTERN = Regex("""\s+%\d+.*$""")
+        private val TRAILING_NUMBER_PATTERN = Regex("""\s+\d{1,2}$""")
+        private val TRAILING_DOTS_PATTERN = Regex("""\.+$""")
+        private val MULTI_SPACE_PATTERN = Regex("""\s+""")
     }
 
     /**
@@ -174,18 +211,18 @@ class ParseInvoiceUseCase @Inject constructor(
         medicineRows: List<InvoiceTableExtractor.TableRow>,
         extractedTable: InvoiceTableExtractor.ExtractedInvoiceTable
     ): Boolean {
-        // Kural 1: En az 5 ilac bulmali (tipik fatura 10-20 kalem)
-        if (medicineRows.size < 5) {
-            Log.d(TAG, "Validation failed: only ${medicineRows.size} medicines found")
+        // Kural 1: En az MIN_MEDICINE_COUNT ilac bulmali
+        if (medicineRows.size < MIN_MEDICINE_COUNT) {
+            Log.d(TAG, "Validation failed: only ${medicineRows.size} medicines found (min: $MIN_MEDICINE_COUNT)")
             return false
         }
 
         // Kural 2: Beyan edilen degerle karsilastir
         val declaredItems = extractedTable.totalItems
         if (declaredItems != null && declaredItems > 0) {
-            // Bulunan ilac sayisi, beyan edilenin %50'sinden az olmamali
-            if (medicineRows.size < declaredItems * 0.5) {
-                Log.d(TAG, "Validation failed: found ${medicineRows.size} but declared $declaredItems")
+            // Bulunan ilac sayisi, beyan edilenin belirli oranindan az olmamali
+            if (medicineRows.size < declaredItems * MIN_DECLARED_MATCH_RATIO) {
+                Log.d(TAG, "Validation failed: found ${medicineRows.size} but declared $declaredItems (min ratio: $MIN_DECLARED_MATCH_RATIO)")
                 return false
             }
         }
@@ -194,11 +231,9 @@ class ParseInvoiceUseCase @Inject constructor(
         // Ornek: "68D- 5AB- ZCE-" gibi isimler hatali gruplama gosterir
         val invalidNames = medicineRows.count { row ->
             val name = row.medicineName ?: ""
-            // Konum kodu paterni: Rakam + 2 Harf + Tire
-            val locationCodePattern = Regex("""\d[A-Z]{2}[-\s]""", RegexOption.IGNORE_CASE)
-            locationCodePattern.findAll(name).count() > 1 // Birden fazla konum kodu varsa
+            LOCATION_CODE_MULTI_PATTERN.findAll(name).count() > 1 // Birden fazla konum kodu varsa
         }
-        if (invalidNames > medicineRows.size * 0.3) {
+        if (invalidNames > medicineRows.size * MAX_INVALID_NAME_RATIO) {
             Log.d(TAG, "Validation failed: $invalidNames/${medicineRows.size} names look like location codes")
             return false
         }
@@ -272,7 +307,7 @@ class ParseInvoiceUseCase @Inject constructor(
 
         // Tum ilaclari birlestir (dozaj bilgisini de dahil et)
         val allMedicines = (medicinesFromLocationCode + medicinesFromKnown).distinctBy {
-            it.name.uppercase().replace(Regex("""[^A-Z0-9]"""), "")
+            it.name.uppercase().replace(ALPHANUMERIC_ONLY_PATTERN, "")
         }
         Log.d(TAG, "Total unique medicines: ${allMedicines.size}")
 
@@ -314,7 +349,7 @@ class ParseInvoiceUseCase @Inject constructor(
                     if (cleanName.length >= 3) {
                         // Dozaj bilgisini de dahil et (ayni ilac farkli dozaj olabilir)
                         // Ornek: APRANAX 275 MG ve APRANAX 550 MG farkli
-                        val normalized = cleanName.uppercase().replace(Regex("""[^A-Z0-9]"""), "")
+                        val normalized = cleanName.uppercase().replace(ALPHANUMERIC_ONLY_PATTERN, "")
                         if (!processedNames.contains(normalized)) {
                             processedNames.add(normalized)
                             items.add(createInvoiceItem(cleanName, 1))
@@ -326,13 +361,13 @@ class ParseInvoiceUseCase @Inject constructor(
             }
 
             // Alternatif: Yer kodu ayirici olmadan (ornek: "4ADAPRANAX")
-            val altMatch = Regex("""^(\d[A-Z]{2})([A-Z]{3,}.*)""", RegexOption.IGNORE_CASE).find(line)
+            val altMatch = LOCATION_CODE_ALT_PATTERN.find(line)
             if (altMatch != null) {
                 var medicinePart = altMatch.groupValues[2].trim()
                 if (containsMedicineForm(medicinePart)) {
                     val cleanName = cleanMedicineName(medicinePart)
                     if (cleanName.length >= 3) {
-                        val normalized = cleanName.uppercase().replace(Regex("""[^A-Z0-9]"""), "")
+                        val normalized = cleanName.uppercase().replace(ALPHANUMERIC_ONLY_PATTERN, "")
                         if (!processedNames.contains(normalized)) {
                             processedNames.add(normalized)
                             items.add(createInvoiceItem(cleanName, 1))
@@ -353,7 +388,7 @@ class ParseInvoiceUseCase @Inject constructor(
         val items = mutableListOf<InvoiceItem>()
         val upperText = text.uppercase()
         val alreadyFoundNames = alreadyFound.map {
-            it.name.uppercase().replace(Regex("""[^A-Z]"""), "").take(6)
+            it.name.uppercase().replace(ALPHA_ONLY_PATTERN, "").take(6)
         }.toSet()
 
         // CO-DIOVAN ozel kontrolu - OCR bazen "- CO" ve "DIOVAN" ayri yazar
@@ -388,7 +423,7 @@ class ParseInvoiceUseCase @Inject constructor(
                     // Bu varyant zaten eklenmis mi kontrol et
                     val variantNorm = variant.uppercase().replace(Regex("""[^A-Z0-9]"""), "")
                     val alreadyAdded = items.any {
-                        it.name.uppercase().replace(Regex("""[^A-Z0-9]"""), "") == variantNorm
+                        it.name.uppercase().replace(ALPHANUMERIC_ONLY_PATTERN, "") == variantNorm
                     }
                     if (!alreadyAdded) {
                         items.add(createInvoiceItem(variant, 1))
@@ -452,24 +487,22 @@ class ParseInvoiceUseCase @Inject constructor(
         val qtyMiadMatches = mutableListOf<Triple<Int, String, Int>>() // qty, match, position
 
         // Pattern 1: Promosyonlu bitisik - "10+108/28" -> 10+1=11, miad=08/28
-        val promoPattern = Regex("""(\d{1,2})\+(\d)(\d{2}/\d{2})""")
-        promoPattern.findAll(text).forEach { match ->
+        PROMO_MIAD_PATTERN.findAll(text).forEach { match ->
             val base = match.groupValues[1].toIntOrNull() ?: 0
             val promo = match.groupValues[2].toIntOrNull() ?: 0
             val total = base + promo
-            if (total in 1..100) {
+            if (total in MIN_QUANTITY..100) {
                 qtyMiadMatches.add(Triple(total, match.value, match.range.first))
                 Log.d(TAG, "Found promo: ${match.value} -> $base+$promo=$total")
             }
         }
 
         // Pattern 2: Promosyonlu bosluklu - "10+1 08/28"
-        val promoSpacePattern = Regex("""(\d{1,2})\+(\d{1,2})\s+(\d{1,2}/\d{2})""")
-        promoSpacePattern.findAll(text).forEach { match ->
+        PROMO_SPACE_PATTERN.findAll(text).forEach { match ->
             val base = match.groupValues[1].toIntOrNull() ?: 0
             val promo = match.groupValues[2].toIntOrNull() ?: 0
             val total = base + promo
-            if (total in 1..100) {
+            if (total in MIN_QUANTITY..100) {
                 val exists = qtyMiadMatches.any { kotlin.math.abs(it.third - match.range.first) < 5 }
                 if (!exists) {
                     qtyMiadMatches.add(Triple(total, match.value, match.range.first))
@@ -479,16 +512,15 @@ class ParseInvoiceUseCase @Inject constructor(
         }
 
         // Pattern 3: Ayrik miktar + miad - "25 04/30", "20 10/28", "15 7/28"
-        val separatePattern = Regex("""(\d{1,2})\s+(\d{1,2}/\d{2})""")
-        separatePattern.findAll(text).forEach { match ->
+        SEPARATE_QTY_MIAD_PATTERN.findAll(text).forEach { match ->
             val qty = match.groupValues[1].toIntOrNull() ?: 0
             val miad = match.groupValues[2]
             val ayYil = miad.split("/")
             if (ayYil.size == 2) {
                 val ay = ayYil[0].toIntOrNull() ?: 0
                 val yil = ayYil[1].toIntOrNull() ?: 0
-                // Miad kontrolu: ay 1-12, yil 24-35
-                if (ay in 1..12 && yil in 24..35 && qty in 1..50) {
+                // Miad kontrolu
+                if (ay in MIN_EXPIRY_MONTH..MAX_EXPIRY_MONTH && yil in MIN_EXPIRY_YEAR..MAX_EXPIRY_YEAR && qty in MIN_QUANTITY..MAX_QUANTITY) {
                     val exists = qtyMiadMatches.any { kotlin.math.abs(it.third - match.range.first) < 5 }
                     if (!exists) {
                         qtyMiadMatches.add(Triple(qty, match.value, match.range.first))
@@ -499,15 +531,14 @@ class ParseInvoiceUseCase @Inject constructor(
         }
 
         // Pattern 4: Birlesmis miktar+miad - "2504/30" -> qty=25, miad=04/30
-        val mergedPattern = Regex("""(\d{1,2})(\d{2}/\d{2})""")
-        mergedPattern.findAll(text).forEach { match ->
+        MERGED_QTY_MIAD_PATTERN.findAll(text).forEach { match ->
             val qty = match.groupValues[1].toIntOrNull() ?: 0
             val miad = match.groupValues[2]
             val ayYil = miad.split("/")
             if (ayYil.size == 2) {
                 val ay = ayYil[0].toIntOrNull() ?: 0
                 val yil = ayYil[1].toIntOrNull() ?: 0
-                if (ay in 1..12 && yil in 24..35 && qty in 1..50) {
+                if (ay in MIN_EXPIRY_MONTH..MAX_EXPIRY_MONTH && yil in MIN_EXPIRY_YEAR..MAX_EXPIRY_YEAR && qty in MIN_QUANTITY..MAX_QUANTITY) {
                     val exists = qtyMiadMatches.any { kotlin.math.abs(it.third - match.range.first) < 5 }
                     if (!exists) {
                         qtyMiadMatches.add(Triple(qty, match.value, match.range.first))
@@ -518,11 +549,10 @@ class ParseInvoiceUseCase @Inject constructor(
         }
 
         // Pattern 5: OCR hatali miad - "25 c2/30" (c yerine 0 olmali) veya "8 40/79" gibi
-        val ocrErrorPattern = Regex("""(\d{1,2})\s+[a-zA-Z]?\d/\d{2}""")
-        ocrErrorPattern.findAll(text).forEach { match ->
+        OCR_ERROR_MIAD_PATTERN.findAll(text).forEach { match ->
             val qtyMatch = Regex("""^(\d{1,2})""").find(match.value)
             val qty = qtyMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
-            if (qty in 1..50) {
+            if (qty in MIN_QUANTITY..MAX_QUANTITY) {
                 val exists = qtyMiadMatches.any { kotlin.math.abs(it.third - match.range.first) < 5 }
                 if (!exists) {
                     qtyMiadMatches.add(Triple(qty, match.value, match.range.first))
@@ -533,11 +563,10 @@ class ParseInvoiceUseCase @Inject constructor(
 
         // Pattern 6: Satir sonunda tek sayi - satirlarda "Tutar" sütunundan once gelen miktar
         // Ornek satirlar: "20 (/2 1,884.20" -> 20
-        val lineEndQtyPattern = Regex("""^(\d{1,2})\s+[\(\[/]""")
         text.lines().forEach { line ->
-            lineEndQtyPattern.find(line.trim())?.let { match ->
+            LINE_START_QTY_PATTERN.find(line.trim())?.let { match ->
                 val qty = match.groupValues[1].toIntOrNull() ?: 0
-                if (qty in 1..50) {
+                if (qty in MIN_QUANTITY..MAX_QUANTITY) {
                     val exists = qtyMiadMatches.any { it.first == qty }
                     if (!exists) {
                         qtyMiadMatches.add(Triple(qty, match.value, 0))
@@ -633,53 +662,53 @@ class ParseInvoiceUseCase @Inject constructor(
     private fun extractQuantityFromLine(line: String, medicineName: String): Int {
         // Konum kodu iceren satir mi? (ornek: "4AD- APRANAX")
         // Bunlardan miktar cikarma - miktar ayri satirda
-        if (Regex("""^\d[A-Z]{2}[-\s]""", RegexOption.IGNORE_CASE).containsMatchIn(line)) {
+        if (LOCATION_CODE_CHECK_PATTERN.containsMatchIn(line)) {
             return 0 // Miktar bu satirda degil
         }
 
         // Pattern 1: Promosyonlu + miad - "10+108/28" veya "5+109/28"
-        val promoMiadMatch = Regex("""(\d{1,2})\+(\d)(\d{2}/\d{2})""").find(line)
+        val promoMiadMatch = PROMO_MIAD_PATTERN.find(line)
         if (promoMiadMatch != null) {
             val base = promoMiadMatch.groupValues[1].toIntOrNull() ?: 0
             val promo = promoMiadMatch.groupValues[2].toIntOrNull() ?: 0
-            if (base in 1..50 && promo in 1..10) {
+            if (base in MIN_QUANTITY..MAX_QUANTITY && promo in MIN_QUANTITY..MAX_PROMO_QUANTITY) {
                 return base + promo
             }
         }
 
         // Pattern 2: Promosyonlu bosluklu - "10+1 08/28"
-        val promoSpaceMatch = Regex("""(\d{1,2})\+(\d{1,2})\s+(\d{1,2}/\d{2})""").find(line)
+        val promoSpaceMatch = PROMO_SPACE_PATTERN.find(line)
         if (promoSpaceMatch != null) {
             val base = promoSpaceMatch.groupValues[1].toIntOrNull() ?: 0
             val promo = promoSpaceMatch.groupValues[2].toIntOrNull() ?: 0
-            if (base in 1..50 && promo in 1..10) {
+            if (base in MIN_QUANTITY..MAX_QUANTITY && promo in MIN_QUANTITY..MAX_PROMO_QUANTITY) {
                 return base + promo
             }
         }
 
         // Pattern 3: Miktar + miad birlestik - "2502/30" (miktar=25)
-        val mergedMatch = Regex("""(\d{1,2})(\d{2}/\d{2})""").find(line)
+        val mergedMatch = MERGED_QTY_MIAD_PATTERN.find(line)
         if (mergedMatch != null) {
             val qty = mergedMatch.groupValues[1].toIntOrNull() ?: 0
             val miad = mergedMatch.groupValues[2]
             val parts = miad.split("/")
             if (parts.size == 2) {
                 val month = parts[0].toIntOrNull() ?: 0
-                if (month in 1..12 && qty in 1..50) {
+                if (month in MIN_EXPIRY_MONTH..MAX_EXPIRY_MONTH && qty in MIN_QUANTITY..MAX_QUANTITY) {
                     return qty
                 }
             }
         }
 
         // Pattern 4: Miktar + bosluk + miad - "25 02/30" veya "10 10/28"
-        val separateMatch = Regex("""(\d{1,2})\s+(\d{1,2}/\d{2})""").find(line)
+        val separateMatch = SEPARATE_QTY_MIAD_PATTERN.find(line)
         if (separateMatch != null) {
             val qty = separateMatch.groupValues[1].toIntOrNull() ?: 0
             val miad = separateMatch.groupValues[2]
             val parts = miad.split("/")
             if (parts.size == 2) {
                 val month = parts[0].toIntOrNull() ?: 0
-                if (month in 1..12 && qty in 1..50) {
+                if (month in MIN_EXPIRY_MONTH..MAX_EXPIRY_MONTH && qty in MIN_QUANTITY..MAX_QUANTITY) {
                     return qty
                 }
             }
@@ -784,8 +813,8 @@ class ParseInvoiceUseCase @Inject constructor(
         }
 
         // Son calistirma: KALEM ve adet sayilarini ayri ayri bul
-        val kalemMatch = Regex("""(\d+)\s*KALEM""", RegexOption.IGNORE_CASE).find(text)
-        val adetMatch = Regex("""(\d+)\s*AD[EF]?[TI]?T[TI]?[IR]""", RegexOption.IGNORE_CASE).find(text)
+        val kalemMatch = KALEM_PATTERN.find(text)
+        val adetMatch = ADET_PATTERN.find(text)
         if (kalemMatch != null && adetMatch != null) {
             val itemCount = kalemMatch.groupValues[1].toIntOrNull()
             val totalQty = adetMatch.groupValues[1].toIntOrNull()
@@ -800,11 +829,11 @@ class ParseInvoiceUseCase @Inject constructor(
 
     private fun findInvoiceNumber(text: String): String? {
         // B2K ile baslayan fatura numarasi
-        val b2kMatch = Regex("""B2K\d{10,}""").find(text)
+        val b2kMatch = B2K_INVOICE_PATTERN.find(text)
         if (b2kMatch != null) return b2kMatch.value
 
         // E-Arsiv No
-        val earsivMatch = Regex("""E-?Ar[sş]iv\s*No\s*:?\s*([A-Z0-9]+)""", RegexOption.IGNORE_CASE).find(text)
+        val earsivMatch = EARSIV_PATTERN.find(text)
         if (earsivMatch != null) return earsivMatch.groupValues.getOrNull(1) ?: earsivMatch.value
 
         return null
@@ -816,7 +845,7 @@ class ParseInvoiceUseCase @Inject constructor(
             return "Selçuk Ecza Deposu"
         }
         // Diger ecza depolari
-        val match = Regex("""([A-ZÇĞİÖŞÜa-zçğıöşü]+\s+)?[Ee]cza\s*[Dd]eposu""").find(text)
+        val match = ECZA_DEPOSU_PATTERN.find(text)
         return match?.value?.trim()
     }
 
@@ -831,19 +860,19 @@ class ParseInvoiceUseCase @Inject constructor(
         var cleaned = name.trim()
 
         // Sondaki fiyat bilgilerini kaldir (XXX.XX formatinda)
-        cleaned = cleaned.replace(Regex("""\s+\d{1,4}[.,]\d{2}.*$"""), "")
+        cleaned = cleaned.replace(PRICE_PATTERN, "")
 
         // Sondaki yuzde bilgilerini kaldir
-        cleaned = cleaned.replace(Regex("""\s+%\d+.*$"""), "")
+        cleaned = cleaned.replace(PERCENT_PATTERN, "")
 
         // Sondaki tek sayilari kaldir (miktar olabilir)
-        cleaned = cleaned.replace(Regex("""\s+\d{1,2}$"""), "")
+        cleaned = cleaned.replace(TRAILING_NUMBER_PATTERN, "")
 
         // Sondaki noktayi kaldir
-        cleaned = cleaned.replace(Regex("""\.+$"""), "")
+        cleaned = cleaned.replace(TRAILING_DOTS_PATTERN, "")
 
         // Coklu bosluklari tek boslukla degistir
-        cleaned = cleaned.replace(Regex("""\s+"""), " ")
+        cleaned = cleaned.replace(MULTI_SPACE_PATTERN, " ")
 
         return cleaned.trim()
     }
